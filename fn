@@ -1,0 +1,82 @@
+# predictive_maintenance_api.py
+
+from flask import Flask, request, jsonify
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+import joblib
+import os
+
+app = Flask(__name__)
+
+MODEL_PATH = "maintenance_model.pkl"
+EXPECTED_FEATURES = ['Temperature', 'Vibration', 'Pressure', 'RunTime']
+
+# Train or load model
+def train_or_load_model():
+    if os.path.exists(MODEL_PATH):
+        print(" Loading existing model...")
+        return joblib.load(MODEL_PATH)
+
+    print(" Training new model...")
+    df = pd.DataFrame({
+        'Temperature': np.random.uniform(60, 100, 200),
+        'Vibration': np.random.uniform(0.1, 1.0, 200),
+        'Pressure': np.random.uniform(5, 15, 200),
+        'RunTime': np.random.uniform(50, 1000, 200),
+        'Failure': np.random.randint(0, 2, 200)
+    })
+
+    X = df.drop('Failure', axis=1)
+    y = df['Failure']
+
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
+    joblib.dump(model, MODEL_PATH)
+
+    # Print evaluation
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    y_pred = model.predict(X_test)
+    print(" Model Evaluation:\n", classification_report(y_test, y_pred))
+
+    return model
+
+# Load model at startup
+model = train_or_load_model()
+
+@app.route('/')
+def home():
+    return "Predictive Maintenance API is running."
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        input_json = request.get_json()
+
+        # Input validation
+        if not input_json:
+            return jsonify({"error": "No JSON data provided"}), 400
+
+        missing = [feat for feat in EXPECTED_FEATURES if feat not in input_json]
+        if missing:
+            return jsonify({"error": f"Missing features: {', '.join(missing)}"}), 400
+
+        # Convert input to DataFrame
+        input_df = pd.DataFrame([input_json])[EXPECTED_FEATURES]
+
+        # Make prediction
+        prediction = model.predict(input_df)[0]
+        probability = model.predict_proba(input_df)[0][1]
+
+        return jsonify({
+            "prediction": int(prediction),
+            "probability_of_failure": round(probability, 3)
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
